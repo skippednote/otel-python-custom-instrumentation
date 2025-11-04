@@ -1,10 +1,12 @@
-from fastapi import FastAPI
+import json
+
 import httpx
+from fastapi import FastAPI
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
 
-from instrument import setup_instrumentation, get_redis_client
+from instrument import get_redis_client, setup_instrumentation
 
 app = FastAPI()
 
@@ -14,7 +16,7 @@ engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 # Setup instrumentation - pass the engine so SQL queries are traced
-tracer, meter, logger = setup_instrumentation(app, engine=engine)
+tracer, _, logger = setup_instrumentation(app, engine=engine)
 redis = get_redis_client()
 
 
@@ -41,7 +43,7 @@ async def httpx_test():
     try:
         with tracer.start_as_current_span("httpx-test") as span:
             async with httpx.AsyncClient() as client:
-                response = await client.get("https://jsonplaceholders.typicode.com/posts")
+                response = await client.get("https://jsonplaceholder.typicode.com/posts")
                 return response.json()
     except Exception as e:
         logger.error(f"Error in httpx-test: {e}")
@@ -51,9 +53,9 @@ async def httpx_test():
 @app.get("/logging-test")
 def logging_test():
     logger.info("Hello, World!")
-    # logger.warning("Warning!")
-    # logger.error("Error!")
-    # logger.critical("Critical!")
+    logger.warning("Warning!")
+    logger.error("Error!")
+    logger.critical("Critical!")
     return {"message": "Logging test"}
 
 
@@ -66,9 +68,6 @@ def get_favorites(username: str):
 
         favorites = redis.get(key)
         if favorites:
-            # Assuming favorites are stored as JSON string
-            import json
-
             try:
                 favorites_list = json.loads(favorites)
                 return {"username": username, "favorites": favorites_list}
@@ -81,10 +80,8 @@ def get_favorites(username: str):
         else:
             return {"username": username, "favorites": []}
 
-
-def main():
-    print("Hello from py-instrument!")
-
-
 if __name__ == "__main__":
-    main()
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

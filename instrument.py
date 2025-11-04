@@ -1,37 +1,26 @@
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-
-
-from redis import Redis
 import logging
 
+from opentelemetry import trace
 from opentelemetry._logs import set_logger_provider
-from opentelemetry.sdk._logs.export import ConsoleLogExporter
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
-
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-
-from opentelemetry.metrics import (
-    CallbackOptions,
-    Observation,
-    get_meter_provider,
-    set_meter_provider,
-)
+from opentelemetry.instrumentation.redis import RedisInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.metrics import get_meter_provider, set_meter_provider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import (
-    PeriodicExportingMetricReader,
     ConsoleMetricExporter,
+    PeriodicExportingMetricReader,
 )
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from redis import Redis
 
 
 def setup_instrumentation(app=None, engine=None, service_name="py-instrument"):
@@ -58,35 +47,26 @@ def setup_instrumentation(app=None, engine=None, service_name="py-instrument"):
     
     # Get the root logger and set its level
     logger = logging.getLogger()
-    logger.setLevel(logging.NOTSET)  # Set logger level to INFO to capture info messages
+    logger.setLevel(logging.NOTSET)  # Set to NOTSET to capture all log levels
     
     # Create and add the OpenTelemetry handler
     otel_handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
     logger.addHandler(otel_handler)
-    
-    # Also add a console handler as a fallback to ensure logs appear
-    # console_handler = logging.StreamHandler()
-    # console_handler.setLevel(logging.INFO)
-    # console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    # logger.addHandler(console_handler)
-    
-    # Do NOT call logger_provider.shutdown() here!
 
     # Tracing setup
     trace.set_tracer_provider(TracerProvider(resource=resource))
     tracer = trace.get_tracer(__name__)
 
-    console_exporter =  OTLPSpanExporter(endpoint="http://localhost:4317", insecure=True)
+    console_exporter = OTLPSpanExporter(endpoint="http://localhost:4317", insecure=True)
     span_processor = BatchSpanProcessor(console_exporter)
     trace.get_tracer_provider().add_span_processor(span_processor)
 
     # Metrics setup
-    # expoter = ConsoleMetricExporter()
-    # reader = PeriodicExportingMetricReader(expoter)
-    # meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
-    # set_meter_provider(meter_provider)
-    # meter = get_meter_provider().get_meter(__name__)
-    meter = {}
+    exporter = ConsoleMetricExporter()
+    reader = PeriodicExportingMetricReader(exporter)
+    meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
+    set_meter_provider(meter_provider)
+    meter = get_meter_provider().get_meter(__name__)
 
     # Instrumentation setup
     if app:
@@ -122,7 +102,6 @@ def setup_instrumentation(app=None, engine=None, service_name="py-instrument"):
     
     AsyncPGInstrumentor().instrument()
     HTTPXClientInstrumentor().instrument()
-    # LoggingInstrumentor should use the logger_provider we set up above
     LoggingInstrumentor().instrument()
 
     return tracer, meter, logger
